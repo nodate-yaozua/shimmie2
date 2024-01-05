@@ -14,6 +14,7 @@ use function MicroHTML\rawHTML;
 use function MicroHTML\INPUT;
 use function MicroHTML\emptyHTML;
 use function MicroHTML\NOSCRIPT;
+use function MicroHTML\SCRIPT;
 use function MicroHTML\DIV;
 use function MicroHTML\BR;
 use function MicroHTML\A;
@@ -64,8 +65,112 @@ class UploadTheme extends Themelet
                 ),
             )
         );
+
+        $script = '
+        // paste-to-upload
+        const rows = document.querySelectorAll("#file_upload tr:has(input[type=file])")
+        rows.forEach(e => {
+            const fileCol = e.querySelector("td:nth-child(1)")
+            const file = fileCol.querySelector("input")
+            const urlCol = e.querySelector("td:nth-child(2)")
+            urlCol.addEventListener("paste", ev => {
+                const items = (event.clipboardData || event.originalEvent.clipboardData).items
+                const imageFile = [...items].find(item => item.type.indexOf("image") >= 0)
+                if (imageFile != null) {
+                    const dataTransfer = new DataTransfer()
+                    dataTransfer.items.add(imageFile.getAsFile())
+                    file.files = dataTransfer.files
+                }
+            })
+        })
+
+        const params = (new URL(document.location)).searchParams
+        if (params.has("clipboardv2")) {
+            const background = document.createElement("div")
+            background.style = "position: fixed; width: 100%; height: 100%; top: 0; left: 0; background: rgba(255, 255, 255, 0.5); display: flex; justify-content: center; align-items: center; zoom: 200%;"
+            document.body.appendChild(background)
+
+            const paste = async (quick) => {
+                const items = await navigator.clipboard.read()
+                if (items.length == 0) return
+                const item = items[0]
+                if (item.types.indexOf("web application/octet-stream") < 0) return
+
+                const data = await item.getType("web application/octet-stream")
+                const arrayBuffer = await data.arrayBuffer()
+                const dataView = new DataView(arrayBuffer)
+                const rawBlobs = []
+                let offset = 0
+                while (offset < arrayBuffer.byteLength) {
+                    const size = dataView.getUint32(offset, true)
+                    offset += 4
+                    const blob = new Blob([arrayBuffer.slice(offset, offset + size)])
+                    rawBlobs.push(blob)
+                    offset += size
+                }
+                const metadata = JSON.parse(await rawBlobs[0].text())
+                const resolvedBlobs = rawBlobs.slice(1).map((e, i) => new Blob([e], { type: metadata.blobs[i].type }))
+
+                const source = document.querySelector("#file_upload input[name=source]")
+                source.value = metadata.source
+                const fileInputs = document.querySelectorAll("#file_upload tr:has(input[type=file]) td:nth-child(1) input")
+
+                for (let i = 0; i < Math.min(resolvedBlobs.length, fileInputs.length); i++) {
+                    const resolvedBlob = resolvedBlobs[i]
+                    const fileInput = fileInputs[i]
+                    let filename
+                    switch (resolvedBlob.type) {
+                        case "image/png": filename = "image.png"; break;
+                        case "image/jpeg": filename = "image.jpg"; break;
+                        case "image/gif": filename = "image.gif"; break;
+                        case "image/webp": filename = "image.webp"; break;
+                        default: filename = "image"; break;
+                    }
+                    const file = new File([resolvedBlob], filename)
+                    const dataTransfer = new DataTransfer()
+                    dataTransfer.items.add(file)
+                    fileInput.files = dataTransfer.files
+                }
+
+                if (quick) {
+                    document.querySelector("#file_upload input[type=submit]").click()
+                }
+            }
+
+            const quickButton = document.createElement("button")
+            quickButton.innerText = "Quick"
+            quickButton.onclick = () => {
+                close()
+                paste(true)
+            }
+            background.appendChild(quickButton)
+
+            const configureButton = document.createElement("button")
+            configureButton.innerText = "Configure"
+            configureButton.onclick = () => {
+                close()
+                paste(false)
+            }
+            background.appendChild(configureButton)
+
+            const keyboardListener = ev => {
+                if (ev.key == "Enter") {
+                    close()
+                    paste(true)
+                }
+            }
+            document.addEventListener("keydown", keyboardListener)
+
+            const close = () => {
+                document.body.removeChild(background)
+                document.removeEventListener("keydown", keyboardListener)
+            }
+        }
+        ';
+
         $html = emptyHTML(
             $form,
+            SCRIPT(rawHTML($script)),
             SMALL(
                 "(",
                 $max_size > 0 ? "Per-file limit: $max_kb" : null,
