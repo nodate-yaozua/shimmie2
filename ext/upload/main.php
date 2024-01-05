@@ -292,7 +292,13 @@ class Upload extends Extension
 
     private function source_for_upload_slot(int $id): ?string
     {
-        return $_POST["source$id"] ?? $_POST['source'] ?? null;
+        if(!empty($_POST["source$id"])) {
+            return $_POST["source$id"];
+        }
+        if(!empty($_POST["source"])) {
+            return $_POST["source"];
+        }
+        return null;
     }
 
     /**
